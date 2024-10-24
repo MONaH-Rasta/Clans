@@ -15,7 +15,7 @@ namespace Oxide.Plugins
 {
     using ClansEx;
 
-    [Info("Clans", "k1lly0u", "0.2.5")]
+    [Info("Clans", "k1lly0u", "0.2.6")]
     class Clans : CovalencePlugin
     {
         #region Fields        
@@ -774,7 +774,7 @@ namespace Oxide.Plugins
         [Command("a")]
         private void cmdAllianceChat(IPlayer player, string command, string[] args)
         {
-            if (!configData.Clans.Alliance.Enabled || args.Length == 0)
+            if (!configData.Clans.Alliance.Enabled || args?.Length == 0)
                 return;
 
             AllianceChat(player, string.Join(" ", args));
@@ -783,7 +783,7 @@ namespace Oxide.Plugins
         [Command("c")]
         private void cmdClanChat(IPlayer player, string command, string[] args)
         {
-            if (args.Length == 0)
+            if (args?.Length == 0)
                 return;
 
             ClanChat(player, string.Join(" ", args));
@@ -792,7 +792,7 @@ namespace Oxide.Plugins
         [Command("cinfo")]
         private void cmdChatClanInfo(IPlayer player, string command, string[] args)
         {            
-            if (args.Length == 0)
+            if (args?.Length == 0)
             {
                 player.Reply(Message("Notification.Generic.SpecifyClanTag", player.Id));
                 return;
@@ -851,7 +851,7 @@ namespace Oxide.Plugins
             if (!configData.Clans.Alliance.Enabled)
                 return;
 
-            if (args.Length < 2)
+            if (args?.Length < 2)
             {
                 player.Reply(string.Format(Message("Notification.ClanHelp.Alliance", player.Id), "ally"));
                 return;
@@ -887,7 +887,7 @@ namespace Oxide.Plugins
         {
             Clan clan = storedData.FindClanByID(player.Id);
 
-            if (args.Length == 0)
+            if (args?.Length == 0)
             {
                 StringBuilder sb = new StringBuilder();
                 if (clan == null)
@@ -1147,8 +1147,11 @@ namespace Oxide.Plugins
         private string GetClanOf(PlayerSession session) => GetClanOf(session?.SteamId ?? string.Empty);
         #endif
 
+        private List<string> GetClanMembers(ulong playerId) => GetClanMembers(playerId.ToString());
+        
         private List<string> GetClanMembers(string playerId) => storedData.FindClanByID(playerId)?.ClanMembers.Keys.ToList() ?? new List<string>();
-               
+
+        private object HasFriend(ulong ownerId, ulong playerId) => HasFriend(ownerId.ToString(), playerId.ToString());
         private object HasFriend(string ownerId, string playerId)
         {
             Clan clanOwner = storedData.FindClanByID(ownerId);
@@ -1162,6 +1165,7 @@ namespace Oxide.Plugins
             return clanOwner.Tag.Equals(clanFriend.Tag);
         }
 
+        private bool IsClanMember(ulong playerId, ulong otherId) => IsClanMember(playerId.ToString(), otherId.ToString());
         private bool IsClanMember(string playerId, string otherId)
         {
             Clan clanPlayer = storedData.FindClanByID(playerId);
@@ -1175,6 +1179,8 @@ namespace Oxide.Plugins
             return clanPlayer.Tag.Equals(clanOther.Tag);
         }
 
+        private bool IsMemberOrAlly(ulong playerId, ulong otherId) => IsMemberOrAlly(playerId.ToString(), otherId.ToString());
+        
         private bool IsMemberOrAlly(string playerId, string otherId)
         {
             Clan playerClan = storedData.FindClanByID(playerId);
@@ -1190,6 +1196,8 @@ namespace Oxide.Plugins
 
             return false;
         }
+        
+        private bool IsAllyPlayer(ulong playerId, ulong otherId) => IsAllyPlayer(playerId.ToString(), otherId.ToString());
         
         private bool IsAllyPlayer(string playerId, string otherId)
         {
@@ -1207,6 +1215,8 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private List<string> GetClanAlliances(ulong playerId) => GetClanAlliances(playerId.ToString());
+
         private List<string> GetClanAlliances(string playerId)
         {
             Clan clan = storedData.FindClanByID(playerId);
@@ -1215,7 +1225,7 @@ namespace Oxide.Plugins
 
             return new List<string>(clan.Alliances);
         }
-#endregion
+        #endregion
 
         #region Clan
         [Serializable]
@@ -1273,7 +1283,7 @@ namespace Oxide.Plugins
                 OnPlayerConnected(player);
             }
 
-#region Connection
+            #region Connection
             internal void OnPlayerConnected(IPlayer player)
             {
                 if (player == null)
@@ -1305,9 +1315,9 @@ namespace Oxide.Plugins
 
                 MarkDirty();
             }
-#endregion
+            #endregion
 
-#region Clan Management
+            #region Clan Management
             internal bool InvitePlayer(IPlayer inviter, IPlayer invitee)
             {
                 if (!IsOwner(inviter.Id) && !IsModerator(inviter.Id))
@@ -1387,6 +1397,11 @@ namespace Oxide.Plugins
                 Interface.Oxide.CallHook("OnClanMemberJoined", player.Id, Tag);
                 Interface.Oxide.CallHook("OnClanMemberJoined", player.Id, currentMembers);
 
+                #if RUST
+                Interface.Oxide.CallHook("OnClanMemberJoined", ulong.Parse(player.Id), Tag);
+                Interface.Oxide.CallHook("OnClanMemberJoined", ulong.Parse(player.Id), currentMembers.ConvertAll(x => ulong.Parse(x)));
+                #endif
+                
                 Interface.Oxide.CallHook("OnClanUpdate", Tag);
 
                 if (configData.Options.LogChanges)
@@ -1413,7 +1428,12 @@ namespace Oxide.Plugins
                 if (ClanMembers.Count == 0)
                 {
                     Interface.Oxide.CallHook("OnClanMemberGone", player.Id, Tag);
-                    Interface.Oxide.CallHook("OnClanMemberGone", player.Id, ClanMembers.Keys.ToList());
+                    Interface.Oxide.CallHook("OnClanMemberGone", player.Id, new List<string>());
+                    
+                    #if RUST
+                    Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(player.Id), Tag);
+                    Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(player.Id), new List<ulong>());
+                    #endif
 
                     if (configData.Options.LogChanges)
                         Instance.LogToFile(Instance.Title, $"{player.Name} has left [{Tag}]", Instance);
@@ -1431,8 +1451,14 @@ namespace Oxide.Plugins
 
                     Broadcast("Notification.Leave.NewOwner", ClanMembers[OwnerID].DisplayName);
                 }
+                
+                List<string> members = ClanMembers.Keys.ToList();
+                #if RUST
+                Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(player.Id), members.ConvertAll(x => ulong.Parse(x)));
+                Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(player.Id), Tag);
+                #endif
 
-                Interface.Oxide.CallHook("OnClanMemberGone", player.Id, ClanMembers.Keys.ToList());
+                Interface.Oxide.CallHook("OnClanMemberGone", player.Id, members);
                 Interface.Oxide.CallHook("OnClanMemberGone", player.Id, Tag);
                 Interface.Oxide.CallHook("OnClanUpdate", Tag);
 
@@ -1482,7 +1508,14 @@ namespace Oxide.Plugins
 
                 Broadcast("Notification.Kick.Reply", player.Name, member.DisplayName);
 
-                Interface.Oxide.CallHook("OnClanMemberGone", targetId, ClanMembers.Keys.ToList());
+                List<string> members = ClanMembers.Keys.ToList();
+                
+                #if RUST
+                Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(targetId), members.ConvertAll(x => ulong.Parse(x)));
+                Interface.Oxide.CallHook("OnClanMemberGone", ulong.Parse(targetId), Tag);
+                #endif
+                
+                Interface.Oxide.CallHook("OnClanMemberGone", targetId, members);
                 Interface.Oxide.CallHook("OnClanMemberGone", targetId, Tag);
                 Interface.Oxide.CallHook("OnClanUpdate", Tag);
 
@@ -1574,6 +1607,9 @@ namespace Oxide.Plugins
                 if (configData.Options.LogChanges)
                     Instance.LogToFile(Instance.Title, $"The clan [{Tag}] was disbanded", Instance);
 
+                #if RUST
+                Interface.CallHook("OnClanDisbanded", clanMembers.ConvertAll(x => ulong.Parse(x)));
+                #endif
                 Interface.CallHook("OnClanDisbanded", clanMembers);
                 Interface.CallHook("OnClanDisbanded", Tag);
             }
@@ -1842,7 +1878,7 @@ namespace Oxide.Plugins
         }
 #endregion
 
-#region Config        
+        #region Config        
         internal static ConfigData configData;
 
         internal class ConfigData
@@ -2071,9 +2107,9 @@ namespace Oxide.Plugins
             configData.Version = Version;
             PrintWarning("Config update completed!");
         }
-#endregion
+        #endregion
 
-#region Data Management
+        #region Data Management
         internal StoredData storedData;
 
         private DynamicConfigFile data;
@@ -2103,6 +2139,7 @@ namespace Oxide.Plugins
             {
                 data = Interface.Oxide.DataFileSystem.GetFile("clan_data");
                 storedData = data.ReadObject<StoredData>();
+                
                 if (storedData == null)
                     storedData = new StoredData();
             }
@@ -2254,9 +2291,9 @@ namespace Oxide.Plugins
                     playerInvites.Remove(target);
             }
         }
-#endregion
+        #endregion
 
-#region Data Conversion
+        #region Data Conversion
         public class OldClan
         {
             public string clanTag = string.Empty;
@@ -2270,9 +2307,9 @@ namespace Oxide.Plugins
             public List<string> invitedAllies = new List<string>();
             public List<string> pendingInvites = new List<string>();
         }
-#endregion
+        #endregion
 
-#region Localization
+        #region Localization
         private static string Message(string key, string playerId = null) => string.Format(COLORED_LABEL, configData.Colors.TextColor, Instance.lang.GetMessage(key, Instance, playerId));
 
         private readonly Dictionary<string, string> Messages = new Dictionary<string, string>
