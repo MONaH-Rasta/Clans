@@ -10,320 +10,349 @@ using System;
 
 namespace Oxide.Plugins
 {
-    [Info("Clans", "k1lly0u", "0.1.52", ResourceId = 2087)]
-    class Clans : CovalencePlugin
+    [Info("Clans", "k1lly0u", "0.1.53")]
+    [Description("Universal Instance with alliance support")]
+    public class Clans : CovalencePlugin
     {
         #region Fields 
         [PluginReference] Plugin BetterChat;
 
-        Dictionary<string, Clan> clanData = new Dictionary<string, Clan>();
+        private Dictionary<string, Clan> clanData = new Dictionary<string, Clan>();
+
         private DynamicConfigFile data;
 
         public Dictionary<string, string> playerClans;
+
         public Dictionary<string, Clan> clanCache;
 
-        static Clans clans;
-        private bool Initiated = false;
-
-        public int memberLimit;
-        public int allyLimit;
+        public static Clans Instance { get; private set; }
         #endregion
         
         #region Oxide Hooks
-        void Loaded()
+        private void Loaded()
         {
             data = Interface.Oxide.DataFileSystem.GetFile("clans_data");
             lang.RegisterMessages(Messages, this);
-            clans = this;
+            Instance = this;
             clanCache = new Dictionary<string, Clan>();
             playerClans = new Dictionary<string, string>();
         }
-        void OnServerInitialized()
+
+        private void OnServerInitialized()
         {
             LoadVariables();
             LoadData();
 
-            memberLimit = configData.ClanLimits.Members;
-            allyLimit = configData.ClanLimits.Alliances;
-
             FillClanList();            
-            Initiated = true;
             SaveLoop();
-            if (BetterChat)
-                SetClanTag();
-            foreach (var player in players.Connected)
+
+            SetClanTag();
+
+            foreach (IPlayer player in players.Connected)
                 OnUserConnected(player);
         }
-        void OnPluginLoaded(Plugin plugin)
+
+        private void OnPluginLoaded(Plugin plugin)
         {
             if (plugin.Title == "BetterChat")
                 SetClanTag();
         }
-        void Unload() => SaveData();
-        void OnUserConnected(IPlayer player)
-        {
-            if (Initiated)
-            {
-                timer.Once(3, () =>
-                {
-                    if (player == null) return;
-                    if (playerClans.ContainsKey(player.Id))
-                    {
-                        var clan = clanCache[playerClans[player.Id]];
-                        if (clan.members.ContainsKey(player.Id))
-                        {
-                            if (clan.members[player.Id] != player.Name)
-                                clan.members[player.Id] = player.Name;
 
-                            if (configData.Settings.ShowJoinMessage)
-                                clan.Broadcast(string.Format(msg("playerCon"), player.Name));
-                        }                        
-                    }
-                });
-            }                     
-        }
-        void OnUserDisconnected(IPlayer player)
+        private void Unload()
         {
-            if (Initiated)
+            configData = null;
+            Instance = null;            
+        }
+
+        private void OnUserConnected(IPlayer player)
+        {
+            timer.In(3, () =>
             {
-                if (configData.Settings.ShowLeaveMessage)
-                {
-                    if (player == null) return;
-                    if (playerClans.ContainsKey(player.Id))
-                    {
-                        var clan = clanCache[playerClans[player.Id]];
-                        clan.Broadcast(string.Format(msg("playerDiscon"), player.Name));
-                    }
-                }
+                if (player == null)
+                    return;
+
+                if (!playerClans.ContainsKey(player.Id))
+                    return;
+
+                Clan clan = clanCache[playerClans[player.Id]];
+                if (!clan.members.ContainsKey(player.Id))
+                    return;
+
+                clan.members[player.Id] = player.Name;
+
+                if (configData.Settings.ShowJoinMessage)
+                    clan.Broadcast(string.Format(Message("playerCon"), player.Name));
+            });
+        }
+
+        private void OnUserDisconnected(IPlayer player)
+        {
+            if (configData.Settings.ShowLeaveMessage)
+            {
+                if (player == null)
+                    return;
+
+                if (!playerClans.ContainsKey(player.Id))
+                    return;
+
+                Clan clan = clanCache[playerClans[player.Id]];
+                clan.Broadcast(string.Format(Message("playerDiscon"), player.Name));
             }
         }
         #endregion
 
         #region Functions
-        void FillClanList()
+        private void FillClanList()
         {
-            foreach(var clan in clanCache)
+            if (clanCache == null)
             {
-                foreach (var member in clan.Value.members)
+                clanCache = new Dictionary<string, Clan>();
+                return;
+            }
+
+            foreach (KeyValuePair<string, Clan> clan in clanCache)
+            {
+                foreach (KeyValuePair<string, string> member in clan.Value.members)
                 {
                     playerClans.Add(member.Key, clan.Key);
                 }
             }
-        }        
-        public bool IsClanMember(string id) => playerClans.ContainsKey(id);
+        }
+
+        public bool PlayerHasClan(string id) => playerClans.ContainsKey(id);
+
         public Clan FindClanByID(string id)
         {
-            if (IsClanMember(id))
-            {
-                var clanName = playerClans[id];
-                var clan = FindClanByTag(clanName);
-                if (clan != null)
-                    return clan;
-            }
-            return null;
+            if (!PlayerHasClan(id))
+                return null;
+
+            Clan clan = FindClanByTag(playerClans[id]);
+            if (clan == null)
+                return null;
+
+            return clan;
         }
+
         public Clan FindClanByTag(string tag)
         {
             Clan clan;
             if (clanCache.TryGetValue(tag, out clan))
                 return clan;
+
             return null;
         }
-       
-        void Reply(IPlayer player, string message, string message2 = null)
+
+        private void Reply(IPlayer player, string message, string message2 = null)
         {
-            var formatMsg = $"<color={configData.MessageOptions.MSG}>{message}</color>";
+            string formatMsg = $"<color={configData.MessageOptions.MSG}>{message}</color>";
+
             if (!string.IsNullOrEmpty(message2))
                 formatMsg = $"<color={configData.MessageOptions.Main}>{message2}</color> {formatMsg}";
+
             player.Reply(formatMsg);
         }
-        void ReplyKey(IPlayer player, string msg, string arg)
+
+        private void ReplyKey(IPlayer player, string message, string arg)
         {
-            var message = $"<color={configData.MessageOptions.MSG}>{msg}</color>".Replace("{0}", $"</color><color={configData.MessageOptions.Main}>{arg}</color><color={configData.MessageOptions.MSG}>");
-            if (message.StartsWith("</color>")) message = message.Substring(9).Trim();            
-            player.Reply(message);
+            string formatMsg = $"<color={configData.MessageOptions.MSG}>{message}</color>".Replace("{0}", $"</color><color={configData.MessageOptions.Main}>{arg}</color><color={configData.MessageOptions.MSG}>");
+
+            if (formatMsg.StartsWith("</color>"))
+                formatMsg = formatMsg.Substring(9).Trim();  
+            
+            player.Reply(formatMsg);
         }
+
         private IPlayer FindPlayer(IPlayer player, string arg)
         {
-            var targets = from p in players.All
+            IEnumerable<IPlayer> targets = from p in players.All
                          where (p.Name.ToLower().Contains(arg.ToLower()) ? true : p.Id == arg)
                          select p;
 
-            if (targets.Count() == 0)
+            int targetCount = targets.Count();
+
+            if (targetCount == 0)
             {
                 if (player != null)
-                    player.Reply(msg("noPlayers", player.Id));
+                    player.Reply(Message("noPlayers", player.Id));
                 return null;
             }
-            if (targets.Count() > 1)
+
+            if (targetCount > 1)
             {
+                for (int i = 0; i < targetCount; i++)
+                {
+                    IPlayer target = targets.ElementAt(i);
+                    if (target.Name.Equals(arg) || target.Id.Equals(arg))
+                        return target;
+                }
+
                 if (player != null)
-                    player.Reply(msg("multiPlayers", player.Id));
+                    player.Reply(Message("multiPlayers", player.Id));
                 return null;
             }
+
             if (targets.Single() != null)
                 return targets.Single();
-            else player.Reply(msg("noPlayers", player.Id));
+            else player.Reply(Message("noPlayers", player.Id));
+
             return null;
         }
+
         private void SetClanTag() => BetterChat?.Call("API_RegisterThirdPartyTitle", new object[] { this, new Func<IPlayer, string>(GetClanTag) });
+
         private string GetClanTag(IPlayer player) => playerClans.ContainsKey(player.Id) ? $"[{configData.MessageOptions.ClanTag}][{playerClans[player.Id]}][/#]" : string.Empty;
         #endregion
 
         #region Commands       
         [Command("clan")]
-        void cmdClan(IPlayer player, string command, string[] args)
+        private void cmdClan(IPlayer player, string command, string[] args)
         {
-            if (Initiated)
+            if (args == null || args.Length == 0)
             {
-                if (args == null || args.Length == 0)
-                {
-                    Reply(player, "", $"{Title}  v {Version}");
-                    ReplyKey(player, msg("cMessHelp", player.Id), "/c <message>");
-                    ReplyKey(player, msg("aMessHelp", player.Id), "/a <message>");
-                    ReplyKey(player, msg("clanHelp", player.Id), "/clanhelp");
-                    ReplyKey(player, msg("clanMembers", player.Id), "/clan members");
-                    return;
-                }
-                switch (args[0].ToLower())
-                {                    
-                    case "create":
-                        CreateClan(player, args);
-                        return;  
-                    case "join":
-                        if (args.Length == 2)                        
-                            JoinClan(player, args[1]);                        
-                        else Reply(player, "/clan join <tag>");
-                        return; 
-                    case "leave":
-                        LeaveClan(player);
-                        return;
-                    case "invite":
-                        if (args.Length >= 2)                        
-                            InviteMember(player, args);                        
-                        else Reply(player, "", msg("noName", player.Id));
-                        return;
-                    case "kick":
-                        if (args.Length >= 2)                        
-                            KickMember(player, args[1]);                        
-                        else Reply(player, "", msg("noID", player.Id));
-                        return;
-                    case "members":
-                        ShowMembers(player);
-                        return;
-                    case "promote":
-                        if (args.Length >= 2)                        
-                            PromoteMember(player, args[1]);                        
-                        else Reply(player, "", msg("noID", player.Id));
-                        return;                    
-                    case "demote":
-                        if (args.Length >= 2)                        
-                            DemoteMember(player, args[1]);                        
-                        else Reply(player, "", msg("noID", player.Id));
-                        return;                    
-                    case "disband":
-                        DisbandClan(player);
-                        return;                   
-                    case "ally":                        
-                        Alliance(player, args);                        
-                        return;                    
-                    default:
-                        cmdClanHelp(player, "clanhelp", null);
-                        break;
-                }
+                Reply(player, "", $"{Title}  v {Version}");
+                ReplyKey(player, Message("cMessHelp", player.Id), "/c <message>");
+                ReplyKey(player, Message("aMessHelp", player.Id), "/a <message>");
+                ReplyKey(player, Message("clanHelp", player.Id), "/clanhelp");
+                ReplyKey(player, Message("clanMembers", player.Id), "/clan members");
+                return;
             }
-        }
-        [Command("c")]
-        void cmdClanChat(IPlayer player, string command, string[] args)
-        {
-            if (Initiated)
-            {
-                if (IsClanMember(player.Id))
-                {
-                    var clanName = playerClans[player.Id];
-                    if (!string.IsNullOrEmpty(clanName))
-                    {
-                        var clan = clanCache[clanName];
-                        string str = string.Join(" ", args);
 
-                        clan.Broadcast($"{player.Name} : {str}");
-                        Interface.CallHook("OnClanChat", player, str);
-                        return;
-                    }
-                }
-                Reply(player, "", msg("noClanData", player.Id));
+            switch (args[0].ToLower())
+            {
+                case "create":
+                    CreateClan(player, args);
+                    return;
+                case "join":
+                    if (args.Length == 2)
+                        JoinClan(player, args[1]);
+                    else Reply(player, "/clan join <tag>");
+                    return;
+                case "leave":
+                    LeaveClan(player);
+                    return;
+                case "invite":
+                    if (args.Length >= 2)
+                        InviteMember(player, args);
+                    else Reply(player, "", Message("noName", player.Id));
+                    return;
+                case "kick":
+                    if (args.Length >= 2)
+                        KickMember(player, args[1]);
+                    else Reply(player, "", Message("noID", player.Id));
+                    return;
+                case "members":
+                    ShowMembers(player);
+                    return;
+                case "promote":
+                    if (args.Length >= 2)
+                        PromoteMember(player, args[1]);
+                    else Reply(player, "", Message("noID", player.Id));
+                    return;
+                case "demote":
+                    if (args.Length >= 2)
+                        DemoteMember(player, args[1]);
+                    else Reply(player, "", Message("noID", player.Id));
+                    return;
+                case "disband":
+                    DisbandClan(player);
+                    return;
+                case "ally":
+                    Alliance(player, args);
+                    return;
+                default:
+                    cmdClanHelp(player, "clanhelp", null);
+                    break;
             }
         }
-        [Command("a")]
-        void cmdAllianceChat(IPlayer player, string command, string[] args)
+
+        [Command("c")]
+        private void cmdClanChat(IPlayer player, string command, string[] args)
         {
-            if (Initiated)
+            if (!PlayerHasClan(player.Id))
             {
-                if (IsClanMember(player.Id))
+                Reply(player, "", Message("noClanData", player.Id));
+                return;
+            }
+
+            string clanName = playerClans[player.Id];
+            if (!string.IsNullOrEmpty(clanName))
+            {
+                Clan clan = clanCache[clanName];
+                string str = string.Join(" ", args);
+
+                clan.Broadcast($"{player.Name} : {str}");
+                Interface.CallHook("OnClanChat", player, str);
+                return;
+            }
+        }
+
+        [Command("a")]
+        private void cmdAllianceChat(IPlayer player, string command, string[] args)
+        {
+            if (!PlayerHasClan(player.Id))
+            {
+                Reply(player, "", Message("noClanData", player.Id));
+                return;
+            }
+
+            string clanName = playerClans[player.Id];
+            if (!string.IsNullOrEmpty(clanName))
+            {
+                Clan clan = clanCache[clanName];
+                if (clan.clanAlliances.Count == 0)
+                    Reply(player, "", Message("noClanAlly", player.Id));
+                else
                 {
-                    var clanName = playerClans[player.Id];
-                    if (!string.IsNullOrEmpty(clanName))
+                    foreach (string clanAllyName in clan.clanAlliances)
                     {
-                        var clan = clanCache[clanName];
-                        if (clan.clanAlliances.Count > 0)
-                        {
-                            foreach (var clanAllyName in clan.clanAlliances)
-                            {
-                                var clanAlly = clanCache[clanAllyName];
-                                clanAlly.Broadcast($"{player.Name} : {string.Join(" ", args)}", clan.clanTag);
-                            }
-                            clan.Broadcast($"{player.Name} : {string.Join(" ", args)}", clan.clanTag);
-                            return;
-                        }
-                        else Reply(player, "", msg("noClanAlly", player.Id));
+                        Clan clanAlly = clanCache[clanAllyName];
+                        clanAlly.Broadcast($"{player.Name} : {string.Join(" ", args)}", clan.clanTag);
                     }
-                }
-                Reply(player, "", msg("noClanData", player.Id));
+                    clan.Broadcast($"{player.Name} : {string.Join(" ", args)}", clan.clanTag);
+                }                 
             }
         }
        
         [Command("clanhelp")]
-        void cmdClanHelp(IPlayer player, string command, string[] args)
+        private void cmdClanHelp(IPlayer player, string command, string[] args)
         {
-            if (Initiated)
+            if (args == null || args.Length == 0)
             {
-                if (args == null || args.Length == 0)
-                {
-                    Reply(player, "", msg("comHelp", player.Id));
-                    ReplyKey(player, msg("memHelp", player.Id), "/clanhelp member");
-                    ReplyKey(player, msg("modHelp", player.Id), "/clanhelp moderator");
-                    ReplyKey(player, msg("ownHelp", player.Id), "/clanhelp owner");
+                Reply(player, "", Message("comHelp", player.Id));
+                ReplyKey(player, Message("memHelp", player.Id), "/clanhelp member");
+                ReplyKey(player, Message("modHelp", player.Id), "/clanhelp moderator");
+                ReplyKey(player, Message("ownHelp", player.Id), "/clanhelp owner");
+                return;
+            }
+
+            switch (args[0].ToLower())
+            {
+                case "member":
+                    Reply(player, "", Message("memCom", player.Id));
+                    ReplyKey(player, Message("cMessHelp", player.Id), "/c <message>");
+                    ReplyKey(player, Message("aMessHelp", player.Id), "/a <message>");
+                    ReplyKey(player, Message("createHelp", player.Id), "/clan create <tag>");
+                    ReplyKey(player, Message("joinHelp", player.Id), "/clan join <tag>");
+                    ReplyKey(player, Message("leaveHelp", player.Id), "/clan leave");
                     return;
-                }
-                switch (args[0].ToLower())
-                {
-                    case "member":
-                        Reply(player, "", msg("memCom", player.Id));
-                        ReplyKey(player, msg("cMessHelp", player.Id), "/c <message>");
-                        ReplyKey(player, msg("aMessHelp", player.Id), "/a <message>");
-                        ReplyKey(player, msg("createHelp", player.Id), "/clan create <tag>");
-                        ReplyKey(player, msg("joinHelp", player.Id), "/clan join <tag>");
-                        ReplyKey(player, msg("leaveHelp", player.Id), "/clan leave");
-                        return;
-                    case "moderator":
-                        Reply(player, "", msg("modCom", player.Id));
-                        ReplyKey(player, msg("inviteHelp", player.Id), "/clan invite <playername>");
-                        ReplyKey(player, msg("cancelHelp", player.Id), "/clan invite cancel <partialname/ID>");
-                        ReplyKey(player, msg("kickHelp", player.Id), "/clan kick <partialname/ID>");
-                        return;
-                    case "owner":
-                        Reply(player, "", msg("ownerCom", player.Id));
-                        ReplyKey(player, msg("promoteHelp", player.Id), "/clan promote <playername>");
-                        ReplyKey(player, msg("demoteHelp", player.Id), "/clan demote <playername>");
-                        ReplyKey(player, msg("disbandHelp", player.Id), "/clan disband");
-                        ReplyKey(player, msg("allyReqHelp", player.Id), "/clan ally request <clantag>");
-                        ReplyKey(player, msg("allyAccHelp", player.Id), "/clan ally accept <clantag>");
-                        ReplyKey(player, msg("allyDecHelp", player.Id), "/clan ally decline <clantag>");
-                        ReplyKey(player, msg("allyCanHelp", player.Id), "/clan ally cancel <clantag>");
-                        return;
-                    default:
-                        break;
-                }
+                case "moderator":
+                    Reply(player, "", Message("modCom", player.Id));
+                    ReplyKey(player, Message("inviteHelp", player.Id), "/clan invite <playername>");
+                    ReplyKey(player, Message("cancelHelp", player.Id), "/clan invite cancel <partialname/ID>");
+                    ReplyKey(player, Message("kickHelp", player.Id), "/clan kick <partialname/ID>");
+                    return;
+                case "owner":
+                    Reply(player, "", Message("ownerCom", player.Id));
+                    ReplyKey(player, Message("promoteHelp", player.Id), "/clan promote <playername>");
+                    ReplyKey(player, Message("demoteHelp", player.Id), "/clan demote <playername>");
+                    ReplyKey(player, Message("disbandHelp", player.Id), "/clan disband");
+                    ReplyKey(player, Message("allyReqHelp", player.Id), "/clan ally request <clantag>");
+                    ReplyKey(player, Message("allyAccHelp", player.Id), "/clan ally accept <clantag>");
+                    ReplyKey(player, Message("allyDecHelp", player.Id), "/clan ally decline <clantag>");
+                    ReplyKey(player, Message("allyCanHelp", player.Id), "/clan ally cancel <clantag>");
+                    return;
+                default:
+                    break;
             }
         }
         #endregion
@@ -331,64 +360,74 @@ namespace Oxide.Plugins
         #region Command Functions
         public void CreateClan(IPlayer player, string[] args)
         {
-            if (args.Length == 2)
+            if (args.Length != 2)
+                Reply(player, "", "/clan create <tag>");
+            else
             {
-                if (IsClanMember(player.Id))
+                if (PlayerHasClan(player.Id))
                 {
-                    Reply(player, "", msg("alreadyMember", player.Id));
+                    Reply(player, "", Message("alreadyMember", player.Id));
                     return;
                 }
+
                 string tag = new string(args[1].Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c)).ToArray());
                 if (tag.Length < configData.Settings.TagMinimum || tag.Length > configData.Settings.TagMaximum)
                 {
-                    Reply(player, "", string.Format(msg("tagForm1", player.Id), configData.Settings.TagMinimum, configData.Settings.TagMaximum));
+                    Reply(player, "", string.Format(Message("tagForm1", player.Id), configData.Settings.TagMinimum, configData.Settings.TagMaximum));
                     return;
                 }
-                if (!clanCache.ContainsKey(tag))
+
+                if (clanCache.ContainsKey(tag))
+                    Reply(player, tag, Message("clanExists", player.Id));
+                else
                 {
                     Clan newClan = new Clan().CreateNewClan(tag, player.Id, player.Name);
                     clanCache.Add(tag, newClan);
                     playerClans.Add(player.Id, tag);
-                    Reply(player, tag, msg("createSucc", player.Id));
+                    Reply(player, tag, Message("createSucc", player.Id));
                 }
-                else Reply(player, tag, msg("clanExists", player.Id));
             }
-            else Reply(player, "", "/clan create <tag>");
         }
+
         public void JoinClan(IPlayer player, string tag)
         {
-            if (IsClanMember(player.Id))
+            if (PlayerHasClan(player.Id))
             {
-                Reply(player, "", msg("alreadyMember", player.Id));
+                Reply(player, "", Message("alreadyMember", player.Id));
                 return;
             }
-            if (clanCache.ContainsKey(tag))
+
+            if (!clanCache.ContainsKey(tag))
+                Reply(player, tag, Message("noFindClan", player.Id));
+            else
             {
-                var clan = clanCache[tag];
-                if (clan.invitedPlayers.ContainsKey(player.Id))
+                Clan clan = clanCache[tag];
+                if (!clan.invitedPlayers.ContainsKey(player.Id))
+                    Reply(player, tag, Message("noInvite", player.Id));
+                else
                 {
                     if (configData.ClanLimits.Members != 0 && clan.members.Count >= configData.ClanLimits.Members)
                     {
-                        Reply(player, "", msg("memberLimit", player.Id));
+                        Reply(player, "", Message("configData.ClanLimits.Members", player.Id));
                         clan.invitedPlayers.Remove(player.Id);
                         return;
                     }
-                    clan.Broadcast(string.Format(msg("hasJoined"), player.Name));
+
+                    clan.Broadcast(string.Format(Message("hasJoined"), player.Name));
                     clan.members.Add(player.Id, player.Name);
                     clan.invitedPlayers.Remove(player.Id);
                     playerClans.Add(player.Id, clan.clanTag);
-                    Reply(player, tag, msg("joinSucc", player.Id));                    
+                    Reply(player, tag, Message("joinSucc", player.Id));                    
                     ClanUpdate(clan.clanTag);
                 }
-                else Reply(player, tag, msg("noInvite", player.Id));
             }
-            else Reply(player, tag, msg("noFindClan", player.Id));
         }
+
         public void LeaveClan(IPlayer player)
         {
-            if (IsClanMember(player.Id))
+            if (PlayerHasClan(player.Id))
             {
-                var clan = clanCache[playerClans[player.Id]];
+                Clan clan = clanCache[playerClans[player.Id]];
                 if (clan.IsOwner(player.Id))
                 {
                     clan.RemoveOwner(player);
@@ -400,228 +439,280 @@ namespace Oxide.Plugins
                 if (clan.IsMember(player.Id))
                     clan.RemoveUser(player.Id, ref clan.members);
 
-                Reply(player, clan.clanTag, msg("leaveSucc", player.Id));
+                Reply(player, clan.clanTag, Message("leaveSucc", player.Id));
                 ClanUpdate(clan.clanTag);
             }
-            else Reply(player, "", msg("notInClan", player.Id));
+            else Reply(player, "", Message("notInClan", player.Id));
         }
+
         public void InviteMember(IPlayer player, string[] args)
-        {
-            if (IsClanMember(player.Id))
+        {            
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
+                Clan clan = clanCache[playerClans[player.Id]];
                 if (!clan.IsOwner(player.Id) && !clan.IsModerator(player.Id))
                 {
-                    Reply(player, "", msg("noInvPerm", player.Id));
+                    Reply(player, "", Message("noInvPerm", player.Id));
                     return;
                 }
+
                 if (configData.ClanLimits.Members != 0 && clan.members.Count >= configData.ClanLimits.Members)
                 {
-                    Reply(player, "", msg("invMemberLimit", player.Id));
+                    Reply(player, "", Message("invMemberLimit", player.Id));
                     return;
                 }
+
                 if (args[1].ToLower() == "cancel")
                 {
-                    var targetName = clan.FindPlayer(args[2], clan.invitedPlayers, false);
+                    string targetName = clan.FindPlayer(args[2], clan.invitedPlayers, false);
                     if (string.IsNullOrEmpty(targetName))
                     {
-                        Reply(player, args[2], msg("noPlayerInv", player.Id));
+                        Reply(player, args[2], Message("noPlayerInv", player.Id));
                         return;
                     }
                     else if (clan.RemoveUser(targetName, ref clan.invitedPlayers))
-                        ReplyKey(player, msg("invCancelled", player.Id), targetName);
+                        ReplyKey(player, Message("invCancelled", player.Id), targetName);
                     return;
                 }
-                var target = FindPlayer(player, args[1]);
+
+                IPlayer target = FindPlayer(player, args[1]);
                 if (target != null)
                 {
-                    if (IsClanMember(target.Id))
+                    if (PlayerHasClan(target.Id))
                     {
-                        ReplyKey(player, msg("playerInClan", player.Id), target.Name);
+                        ReplyKey(player, Message("playerInClan", player.Id), target.Name);
                         return;
                     }
+
                     if (clan.invitedPlayers.ContainsKey(target.Id))
                     {
-                        ReplyKey(player, msg("alreadyInvited", player.Id), target.Name);
+                        ReplyKey(player, Message("alreadyInvited", player.Id), target.Name);
                         return;
                     }
+
                     clan.invitedPlayers.Add(target.Id, target.Name);
-                    Reply(target, clan.clanTag, msg("clanInv"));
+                    Reply(target, clan.clanTag, Message("clanInv"));
                     ReplyKey(player, "You have invited {0} to join your clan", target.Name);
                     ClanUpdate(clan.clanTag);
                     return;
                 }                
             }
-            else Reply(player, "", msg("notInClan", player.Id));
         }
+
         public object KickMember(IPlayer player, string targetplayer)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
+                Clan clan = clanCache[playerClans[player.Id]];
                 if (!clan.IsOwner(player.Id) && !clan.IsModerator(player.Id))
                 {
-                    Reply(player, "", msg("noKickPerm", player.Id));
+                    Reply(player, "", Message("noKickPerm", player.Id));
                     return null;
                 }
 
-                var target = clan.FindPlayer(targetplayer, clan.members, true);                
-                if (!string.IsNullOrEmpty(target))
+                string target = clan.FindPlayer(targetplayer, clan.members, true);
+                if (string.IsNullOrEmpty(target))
                 {
-                    var targetName = clan.members[target];
-                    if (clan.IsOwner(target))
-                    {
-                        Reply(player, "", msg("noKickOwner", player.Id));
-                        return null;
-                    }
-
-                    if (!clan.IsOwner(player.Id) && clan.IsModerator(target))
-                    {
-                        Reply(player, "", msg("noKickMod", player.Id));
-                        return null;
-                    }
-
-                    if (target == player.Id)
-                    {
-                        Reply(player, "", msg("noKickSelf", player.Id));
-                        return null;
-                    }
-
-                    if (clan.RemoveUser(target, ref clan.members))
-                    {
-                        if (clan.IsModerator(target))
-                            clan.moderators.Remove(target);
-
-                        playerClans.Remove(target);
-
-                        Reply(player, string.Format(msg("kickSucc", player.Id), targetName));
-                        ClanUpdate(clan.clanTag);
-
-                        var targetPlayer = players.FindPlayer(target);
-                        if (targetPlayer != null && targetPlayer.IsConnected)
-                            Reply(targetPlayer, clan.clanTag, msg("kicked"));
-                        return true;
-                    }
-                    else ReplyKey(player, msg("kickError", player.Id), targetName); 
+                    Reply(player, "", Message("noClanMember", player.Id));
+                    return null;
                 }
-                else Reply(player, "", msg("noClanMember", player.Id));  
+
+                string targetName = clan.members[target];
+                if (clan.IsOwner(target))
+                {
+                    Reply(player, "", Message("noKickOwner", player.Id));
+                    return null;
+                }
+
+                if (!clan.IsOwner(player.Id) && clan.IsModerator(target))
+                {
+                    Reply(player, "", Message("noKickMod", player.Id));
+                    return null;
+                }
+
+                if (target == player.Id)
+                {
+                    Reply(player, "", Message("noKickSelf", player.Id));
+                    return null;
+                }
+
+                if (!clan.RemoveUser(target, ref clan.members))
+                    ReplyKey(player, Message("kickError", player.Id), targetName);
+                else
+                {
+                    if (clan.IsModerator(target))
+                        clan.moderators.Remove(target);
+
+                    playerClans.Remove(target);
+
+                    Reply(player, string.Format(Message("kickSucc", player.Id), targetName));
+                    ClanUpdate(clan.clanTag);
+
+                    IPlayer targetPlayer = players.FindPlayer(target);
+                    if (targetPlayer != null && targetPlayer.IsConnected)
+                        Reply(targetPlayer, clan.clanTag, Message("kicked"));
+
+                    return true;
+                }
             }
-            else Reply(player, "", msg("notInClan", player.Id));
             return null;
         }
+
         public object PromoteMember(IPlayer player, string targetplayer)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
+                Clan clan = clanCache[playerClans[player.Id]];
+                if (clan == null)
+                {
+                    Reply(player, "", Message("noClanData", player.Id));
+                    return null;
+                }
+
                 if (!clan.IsOwner(player.Id))
                 {
-                    Reply(player, "", msg("notOwnerProm", player.Id));
+                    Reply(player, "", Message("notOwnerProm", player.Id));
                     return null;
                 }
 
                 if (clan.moderators.Count != 0 && clan.moderators.Count >= configData.ClanLimits.Moderators)
                 {
-                    Reply(player, "", msg("modLimit", player.Id));
+                    Reply(player, "", Message("modLimit", player.Id));
                     return null;
                 }
 
-                var target = clan.FindPlayer(targetplayer, clan.members, true);
-                var targetName = clan.members[target];
+                string target = clan.FindPlayer(targetplayer, clan.members, true);
+                if (string.IsNullOrEmpty(target))
+                {
+                    Reply(player, "", Message("noClanMember", player.Id));
+                    return null;
+                }
+
+                string targetName = clan.members[target];
                 if (clan.IsModerator(target) || clan.IsOwner(target))
                 {
-                    ReplyKey(player, msg("alreadyMod", player.Id), targetName);
+                    ReplyKey(player, Message("alreadyMod", player.Id), targetName);
                     return null;
                 }
 
                 clan.moderators.Add(target);
 
-                Reply(player, targetName, msg("promSucc", player.Id));
+                Reply(player, targetName, Message("promSucc", player.Id));
                 ClanUpdate(clan.clanTag);
 
-                var targetPlayer = players.FindPlayer(target);
+                IPlayer targetPlayer = players.FindPlayer(target);
                 if (targetPlayer != null && targetPlayer.IsConnected)
-                    ReplyKey(targetPlayer, msg("beenProm", targetPlayer.Id), player.Name);
+                    ReplyKey(targetPlayer, Message("beenProm", targetPlayer.Id), player.Name);
 
                 return true;
             }
-            else { Reply(player, "", msg("notInClan", player.Id)); return null; }
+            return null;
         }
+
         public object DemoteMember(IPlayer player, string targetplayer)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
-                var target = clan.FindPlayer(targetplayer, clan.members, true);
-                var targetName = clan.members[target];
+                Clan clan = clanCache[playerClans[player.Id]];
+
+                string target = clan.FindPlayer(targetplayer, clan.members, true);
+                if (string.IsNullOrEmpty(target))
+                {
+                    Reply(player, "", Message("noClanMember", player.Id));
+                    return null;
+                }
+
+                string targetName = clan.members[target];
+
                 if (clan.IsModerator(target) && clan.IsOwner(player.Id))
                 {
                     clan.moderators.Remove(target);
-                    Reply(player, string.Format(msg("demSucc", player.Id), targetName));
+                    Reply(player, string.Format(Message("demSucc", player.Id), targetName));
                     ClanUpdate(clan.clanTag);
 
-                    var targetPlayer = players.FindPlayer(target);
+                    IPlayer targetPlayer = players.FindPlayer(target);
                     if (targetPlayer != null && targetPlayer.IsConnected)
-                        ReplyKey(targetPlayer, msg("beenDem", targetPlayer.Id), player.Name);
+                        ReplyKey(targetPlayer, Message("beenDem", targetPlayer.Id), player.Name);
 
                     return true;
                 }
-                else ReplyKey(player, msg("notMod", player.Id), targetName);
+                else ReplyKey(player, Message("notMod", player.Id), targetName);
             }
-            else Reply(player, "", msg("notInClan", player.Id));
             return null;
         }
+
         public void DisbandClan(IPlayer player)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
-                if (clan.IsOwner(player.Id))
+                Clan clan = clanCache[playerClans[player.Id]];
+                if (!clan.IsOwner(player.Id))
+                    Reply(player, "", Message("notOwnerDisb", player.Id));
+                else
                 {
-                    foreach (var member in clan.members)
+                    foreach (KeyValuePair<string, string> member in clan.members)
                     {
                         if (member.Key != player.Id)
                         {
-                            var targetPlayer = players.FindPlayer(member.Key);
+                            IPlayer targetPlayer = players.FindPlayer(member.Key);
                             if (targetPlayer != null && targetPlayer.IsConnected)
-                                ReplyKey(targetPlayer, msg("beenDisb", targetPlayer.Id), player.Name);
+                                ReplyKey(targetPlayer, Message("beenDisb", targetPlayer.Id), player.Name);
                         }
                         playerClans.Remove(member.Key);
                     }
                     ClanDestroy(clan.clanTag);
                     clanCache.Remove(clan.clanTag);
-                    Reply(player, "", msg("disbSucc", player.Id));
+                    Reply(player, "", Message("disbSucc", player.Id));
                 }
-                else Reply(player, "", msg("notOwnerDisb", player.Id));
             }
-            else Reply(player, "", msg("notInClan", player.Id));
         }
+
         public void ShowMembers(IPlayer player)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
-                var returnString = $"<color={clans.configData.MessageOptions.ClanChat}>{msg("clanmembers", player.Id)}</color>:\n";
+                Clan clan = clanCache[playerClans[player.Id]];
+                string returnString = $"<color={configData.MessageOptions.ClanChat}>{Message("clanmembers", player.Id)}</color>:\n";
                 int i = 1;
-                foreach (var member in clan.members)
+                foreach (KeyValuePair<string, string> member in clan.members)
                 {
-                    returnString += $"{(clan.IsOwner(member.Key) ? $"{msg("owner", player.Id)} - " : clan.IsModerator(member.Key) ? $"{msg("moderator", player.Id)} - " : $"{msg("member", player.Id)} - ")}{member.Value} - {((covalence.Players.FindPlayerById(member.Key)?.IsConnected ?? false) ? $"<color=#3CD751>{msg("online", player.Id)}" : $"<color=#d85540>{msg("offline", player.Id)}")}</color>{(i < clan.members.Count ? "\n" : "")}";                    
+                    returnString += $"{(clan.IsOwner(member.Key) ? $"{Message("owner", player.Id)} - " : clan.IsModerator(member.Key) ? $"{Message("moderator", player.Id)} - " : $"{Message("member", player.Id)} - ")}{member.Value} - {((covalence.Players.FindPlayerById(member.Key)?.IsConnected ?? false) ? $"<color=#3CD751>{Message("online", player.Id)}" : $"<color=#d85540>{Message("offline", player.Id)}")}</color>{(i < clan.members.Count ? "\n" : "")}";                    
                     i++;
                 }
                 Reply(player, returnString);
             }
-            else Reply(player, "", msg("notInClan", player.Id));
         }
+
         public void Alliance(IPlayer player, string[] args)
         {
-            if (IsClanMember(player.Id))
+            if (!PlayerHasClan(player.Id))
+                Reply(player, "", Message("notInClan", player.Id));
+            else
             {
-                var clan = clanCache[playerClans[player.Id]];
-                if (clan.IsOwner(player.Id))
+                Clan clan = clanCache[playerClans[player.Id]];
+                if (!clan.IsOwner(player.Id))
+                    Reply(player, "", Message("ownerAlly", player.Id));
+                else
                 {
-                    if (args.Length == 3)
+                    if (args.Length != 3)
+                        Reply(player, "Syntax:\n/clan ally request <clantag>\n/clan ally accept <clantag>");
+                    else
                     {
-                        if (clanCache.ContainsKey(args[2]))
+                        if (!clanCache.ContainsKey(args[2]))
+                            ReplyKey(player, Message("clanNoExist", player.Id), args[2]);
+                        else
                         {
                             Clan targetClan = clanCache[args[2]];
 
@@ -630,19 +721,19 @@ namespace Oxide.Plugins
                                 case "request":
                                     if (configData.ClanLimits.Alliances != 0 && clan.clanAlliances.Count >= configData.ClanLimits.Alliances)
                                     {
-                                        Reply(player, "", msg("allyLimit", player.Id));
+                                        Reply(player, "", Message("configData.ClanLimits.Alliances", player.Id));
                                         return;
                                     }
 
                                     if (clan.invitedAllies.Contains(targetClan.clanTag))
                                     {
-                                        Reply(player, args[2], msg("invitePending", player.Id));
+                                        Reply(player, args[2], Message("invitePending", player.Id));
                                         return;
                                     }
 
                                     if (clan.clanAlliances.Contains(targetClan.clanTag))
                                     {
-                                        Reply(player, args[2], msg("alreadyAllies", player.Id));
+                                        Reply(player, args[2], Message("alreadyAllies", player.Id));
                                         return;
                                     }
                                     else
@@ -650,12 +741,12 @@ namespace Oxide.Plugins
                                         targetClan.pendingInvites.Add(clan.clanTag);
                                         clan.invitedAllies.Add(targetClan.clanTag);
 
-                                        Reply(player, targetClan.clanTag, msg("allyReq", player.Id));
+                                        Reply(player, targetClan.clanTag, Message("allyReq", player.Id));
                                         ClanUpdate(clan.clanTag);
 
-                                        var targetOwner = players.FindPlayer(targetClan.ownerID);
+                                        IPlayer targetOwner = players.FindPlayer(targetClan.ownerID);
                                         if (targetOwner != null && targetOwner.IsConnected)
-                                            ReplyKey(targetOwner, msg("reqAlliance", targetOwner.Id), clan.clanTag);
+                                            ReplyKey(targetOwner, Message("reqAlliance", targetOwner.Id), clan.clanTag);
                                         return;
                                     }
 
@@ -664,38 +755,39 @@ namespace Oxide.Plugins
                                     {
                                         if (configData.ClanLimits.Alliances != 0 && targetClan.clanAlliances.Count >= configData.ClanLimits.Alliances)
                                         {
-                                            ReplyKey(player, msg("allyAccLimit", player.Id), targetClan.clanTag);
+                                            ReplyKey(player, Message("allyAccLimit", player.Id), targetClan.clanTag);
                                             targetClan.invitedAllies.Remove(clan.clanTag);
                                             clan.pendingInvites.Remove(targetClan.clanTag);
                                             return;
                                         }
+
                                         targetClan.invitedAllies.Remove(clan.clanTag);
                                         targetClan.clanAlliances.Add(clan.clanTag);
                                         clan.pendingInvites.Remove(targetClan.clanTag);
                                         clan.clanAlliances.Add(targetClan.clanTag);
 
-                                        Reply(player, targetClan.clanTag, msg("allyAcc", player.Id));
+                                        Reply(player, targetClan.clanTag, Message("allyAcc", player.Id));
                                         ClanUpdate(clan.clanTag);
 
-                                        var targetOwner = players.FindPlayer(targetClan.ownerID);
+                                        IPlayer targetOwner = players.FindPlayer(targetClan.ownerID);
                                         if (targetOwner != null && targetOwner.IsConnected)
-                                            ReplyKey(targetOwner, msg("allyAccSucc", targetOwner.Id), clan.clanTag);
+                                            ReplyKey(targetOwner, Message("allyAccSucc", targetOwner.Id), clan.clanTag);
                                     }
-                                    else Reply(player, args[2], msg("noAllyInv", player.Id));
+                                    else Reply(player, args[2], Message("noAllyInv", player.Id));
 
                                     return;
                                 case "decline":
                                     if (clan.pendingInvites.Contains(targetClan.clanTag))
                                     {
                                         targetClan.invitedAllies.Remove(clan.clanTag);
-                                        Reply(player, targetClan.clanTag, msg("allyDec", player.Id));
+                                        Reply(player, targetClan.clanTag, Message("allyDec", player.Id));
                                         ClanUpdate(clan.clanTag);
 
-                                        var targetOwner = players.FindPlayer(targetClan.ownerID);
+                                        IPlayer targetOwner = players.FindPlayer(targetClan.ownerID);
                                         if (targetOwner != null && targetOwner.IsConnected)
-                                            ReplyKey(targetOwner, msg("allyDecSucc", targetOwner.Id), clan.clanTag);
+                                            ReplyKey(targetOwner, Message("allyDecSucc", targetOwner.Id), clan.clanTag);
                                     }
-                                    else Reply(player, args[2], msg("noAllyInv", player.Id));
+                                    else Reply(player, args[2], Message("noAllyInv", player.Id));
                                     return;
 
                                 case "cancel":
@@ -703,25 +795,25 @@ namespace Oxide.Plugins
                                     {
                                         targetClan.clanAlliances.Remove(clan.clanTag);
                                         clan.clanAlliances.Remove(clan.clanTag);
-                                        Reply(player, targetClan.clanTag, msg("allyCan", player.Id));
+                                        Reply(player, targetClan.clanTag, Message("allyCan", player.Id));
                                         ClanUpdate(clan.clanTag);
 
-                                        var targetOwner = players.FindPlayer(targetClan.ownerID);
+                                        IPlayer targetOwner = players.FindPlayer(targetClan.ownerID);
                                         if (targetOwner != null && targetOwner.IsConnected)
-                                            ReplyKey(targetOwner, msg("allyCanSucc", targetOwner.Id), clan.clanTag);
+                                            ReplyKey(targetOwner, Message("allyCanSucc", targetOwner.Id), clan.clanTag);
                                     }
                                     else if (clan.invitedAllies.Contains(args[2]))
                                     {
                                         targetClan.pendingInvites.Remove(clan.clanTag);
                                         clan.invitedAllies.Remove(clan.clanTag);
-                                        Reply(player, targetClan.clanTag, msg("allyInvCan", player.Id));
+                                        Reply(player, targetClan.clanTag, Message("allyInvCan", player.Id));
                                         ClanUpdate(clan.clanTag);
 
-                                        var targetOwner = players.FindPlayer(targetClan.ownerID);
+                                        IPlayer targetOwner = players.FindPlayer(targetClan.ownerID);
                                         if (targetOwner != null && targetOwner.IsConnected)
-                                            ReplyKey(targetOwner, msg("allyInvCan", targetOwner.Id), clan.clanTag);
+                                            ReplyKey(targetOwner, Message("allyInvCan", targetOwner.Id), clan.clanTag);
                                     }
-                                    else Reply(player, args[2], msg("noAlly", player.Id));
+                                    else Reply(player, args[2], Message("noAlly", player.Id));
                                     return;
 
                                 default:
@@ -729,26 +821,23 @@ namespace Oxide.Plugins
                                     return;
                             }
                         }
-                        else ReplyKey(player, msg("clanNoExist", player.Id), args[2]);
                     }
-                    else Reply(player, "Syntax:\n/clan ally request <clantag>\n/clan ally accept <clantag>");
                 }
-                else Reply(player, "", msg("ownerAlly", player.Id));
             }
-            else Reply(player, "", msg("notInClan", player.Id));
         }
         #endregion
 
         #region API
-
         private JObject GetClan(string tag)
         {
-            var clan = FindClanByTag(tag);
+            Clan clan = FindClanByTag(tag);
             if (clan == null)
                 return null;
             return clan.ToJObject();
         }
+
         private JArray GetAllClans() => new JArray(clanCache.Keys); 
+
         private string GetClanOf(object player)
         {
             if (player == null)            
@@ -766,7 +855,7 @@ namespace Oxide.Plugins
             if (!(player is string))            
                 throw new ArgumentException("player");
             
-            var clan = FindClanByID((string)player);
+            Clan clan = FindClanByID((string)player);
             if (clan == null)            
                 return null;
             
@@ -774,14 +863,64 @@ namespace Oxide.Plugins
         }        
 
         private void ClanCreate(string tag) => Interface.CallHook("OnClanCreate", tag);
+
         private void ClanUpdate(string tag) => Interface.CallHook("OnClanUpdate", tag);
+
         private void ClanDestroy(string tag) => Interface.CallHook("OnClanDestroy", tag);
+
+        private bool IsClanMember(string playerId, string otherId)
+        {
+            Clan playerClan = FindClanByID(playerId);
+            if (playerClan == null)
+                return false;
+
+            Clan otherClan = FindClanByID(otherId);
+            if (otherClan == null)
+                return false;
+
+            if (playerClan.clanTag != otherClan.clanTag)
+                return false;
+
+            return true;
+        }
+
+        private bool IsMemberOrAlly(string playerId, string otherId)
+        {
+            Clan playerClan = FindClanByID(playerId);
+            if (playerClan == null)
+                return false;
+
+            Clan otherClan = FindClanByID(otherId);
+            if (otherClan == null)
+                return false;
+
+            if ((playerClan.clanTag == otherClan.clanTag) || playerClan.clanAlliances.Contains(otherClan.clanTag))
+                return true;
+
+            return false;
+        }
+
+        private bool IsAllyPlayer(string playerId, string otherId)
+        {
+            Clan playerClan = FindClanByID(playerId);
+            if (playerClan == null)
+                return false;
+
+            Clan otherClan = FindClanByID(otherId);
+            if (otherClan == null)
+                return false;
+
+            if (playerClan.clanAlliances.Contains(otherClan.clanTag))
+                return true;
+
+            return false;
+        }
         #endregion
 
         #region Config        
-        private ConfigData configData;
+        private static ConfigData configData;
         
-        class ConfigData
+        private class ConfigData
         {
             [JsonProperty(PropertyName = "Limitations")]
             public ClanLimit ClanLimits { get; set; }
@@ -824,14 +963,16 @@ namespace Oxide.Plugins
                 public int SaveTimer { get; set; }
             }
         }
+
         private void LoadVariables()
         {
             LoadConfigVariables();
             SaveConfig();
         }
+
         protected override void LoadDefaultConfig()
         {
-            var config = new ConfigData
+            ConfigData config = new ConfigData
             {
                 ClanLimits = new ConfigData.ClanLimit
                 {
@@ -857,18 +998,22 @@ namespace Oxide.Plugins
             };
             SaveConfig(config);
         }
+
         private void LoadConfigVariables() => configData = Config.ReadObject<ConfigData>();
-        void SaveConfig(ConfigData config) => Config.WriteObject(config, true);        
+
+        private void SaveConfig(ConfigData config) => Config.WriteObject(config, true);
         #endregion
 
         #region Data Management
-        void SaveLoop() => timer.Once(configData.Settings.SaveTimer * 60, () => { SaveData(); SaveLoop(); });
-        void SaveData()
+        private void SaveLoop() => timer.Once(configData.Settings.SaveTimer * 60, () => { SaveData(); SaveLoop(); });
+
+        private void SaveData()
         {
             clanData = clanCache;
             data.WriteObject(clanData);
         }
-        void LoadData()
+
+        private void LoadData()
         {
             try
             {
@@ -880,6 +1025,7 @@ namespace Oxide.Plugins
                 clanData = new Dictionary<string, Clan>();
             }
         }
+
         public class Clan
         {
             public string clanTag = string.Empty;
@@ -898,13 +1044,18 @@ namespace Oxide.Plugins
                 this.clanTag = clanTag;
                 this.ownerID = ownerID;
                 members.Add(ownerID, ownerName);
-                clans.ClanCreate(clanTag);
+                Instance.ClanCreate(clanTag);
                 return this;
             }
+
             public bool IsOwner(string ID) => ownerID == ID;
+
             public bool IsModerator(string ID) => moderators.Contains(ID);
+
             public bool IsMember(string ID) => members.ContainsKey(ID);
+
             public bool IsInvited(string ID) => invitedPlayers.ContainsKey(ID);
+
             public void RemoveOwner(IPlayer player)
             {
                 RemoveUser(ownerID, ref members);
@@ -918,112 +1069,123 @@ namespace Oxide.Plugins
                 if (!string.IsNullOrEmpty(newOwner))
                 {
                     ownerID = newOwner;
-                    var target = clans.players.FindPlayer(newOwner);
+                    IPlayer target = Instance.players.FindPlayer(newOwner);
                     if (target != null && target.IsConnected)
-                        clans.Reply(target, clans.msg("ownerProm", target.Id));
+                        Instance.Reply(target, Instance.Message("ownerProm", target.Id));
 
-                    clans.Reply(player, clanTag, clans.msg("leaveSucc", target.Id));
-                    clans.ClanUpdate(clanTag);
+                    Instance.Reply(player, clanTag, Instance.Message("leaveSucc", target.Id));
+                    Instance.ClanUpdate(clanTag);
                 }
                 else
                 {
-                    clans.ReplyKey(player, clans.msg("clanDestroy", player.Id), clanTag);
-                    clans.clanCache.Remove(clanTag);
-                    clans.playerClans.Remove(player.Id);
-                    clans.ClanDestroy(clanTag);
+                    Instance.ReplyKey(player, Instance.Message("clanDestroy", player.Id), clanTag);
+                    Instance.clanCache.Remove(clanTag);
+                    Instance.playerClans.Remove(player.Id);
+                    Instance.ClanDestroy(clanTag);
                 }
             }
+
             public bool RemoveUser(string IDName, ref Dictionary<string, string> targetDict)
             {
                 if (targetDict.ContainsKey(IDName))
                 {
                     targetDict.Remove(IDName);
-                    clans.playerClans.Remove(IDName);
+                    Instance.playerClans.Remove(IDName);
                     return true;
                 }
+
                 if (targetDict.ContainsValue(IDName))
                 {
-                    var player = targetDict.FirstOrDefault(x => x.Value == IDName).Key;
+                    string player = targetDict.FirstOrDefault(x => x.Value == IDName).Key;
                     targetDict.Remove(player);
-                    clans.playerClans.Remove(player);
+                    Instance.playerClans.Remove(player);
                     return true;
                 }
                 else
                 {
-                    foreach (var player in targetDict)
+                    foreach (KeyValuePair<string, string> player in targetDict)
                     {
                         if (player.Value.Contains(IDName))
                         {
                             targetDict.Remove(player.Key);
-                            clans.playerClans.Remove(player.Key);
+                            Instance.playerClans.Remove(player.Key);
                             return true;
                         }
                     }
                 }
                 return false;
             }
+
             public string FindPlayer(string IDName, Dictionary<string, string> targetDict, bool ID)
             {
                 if (targetDict.ContainsKey(IDName))
-                    if (ID) return IDName;
+                {
+                    if (ID)
+                        return IDName;
                     else return targetDict[IDName];
-
+                }
                 else if (targetDict.ContainsValue(IDName))
-                    if (ID) return targetDict.FirstOrDefault(x => x.Value == IDName).Key;
+                {
+                    if (ID)
+                        return targetDict.FirstOrDefault(x => x.Value == IDName).Key;
                     else return IDName;
-
+                }
                 else
                 {
-                    foreach (var player in targetDict)
+                    foreach (KeyValuePair<string, string> player in targetDict)
                     {
                         if (player.Value.Contains(IDName))
                         {
-                            if (ID) return player.Key;
+                            if (ID)
+                                return player.Key;
                             else return player.Value;
                         }
                     }
                 }
                 return null;
             }
+
             public void Broadcast(string message, string sender = "Clan")
             {
-                foreach (var member in members)
+                foreach (KeyValuePair<string, string> member in members)
                 {
-                    IPlayer target = clans.players.FindPlayer(member.Value);
+                    IPlayer target = Instance.players.FindPlayer(member.Value);
                     if (target != null && target.IsConnected)
-                        target.Reply($"<color={clans.configData.MessageOptions.ClanChat}>[{sender}]</color> :<color={clans.configData.MessageOptions.MSG}> {message}</color>");
+                        target.Reply($"<color={configData.MessageOptions.ClanChat}>[{sender}]</color> :<color={configData.MessageOptions.MSG}> {message}</color>");
                 }
             }
+
             internal JObject ToJObject()
             {
-                var obj = new JObject();
+                JObject obj = new JObject();
                 obj["tag"] = clanTag;
                 obj["owner"] = ownerID;
 
-                var jmoderators = new JArray();
-                foreach (var moderator in moderators)
+                JArray jmoderators = new JArray();
+                foreach (string moderator in moderators)
                     jmoderators.Add(moderator);
                 obj["moderators"] = jmoderators;
 
-                var jmembers = new JArray();
-                foreach (var member in members)
+                JArray jmembers = new JArray();
+                foreach (KeyValuePair<string, string> member in members)
                     jmembers.Add(member.Key);
                 obj["members"] = jmembers;
 
-                var jinvited = new JArray();
-                foreach (var invite in invitedPlayers)
+                JArray jinvited = new JArray();
+                foreach (KeyValuePair<string, string> invite in invitedPlayers)
                     jinvited.Add(invite.Key);
                 obj["invited"] = jinvited;
 
-                var jallies = new JArray();
-                foreach (var ally in clanAlliances)
+                JArray jallies = new JArray();
+                foreach (string ally in clanAlliances)
                     jallies.Add(ally);
                 obj["allies"] = jallies;
 
-                var jinvallies = new JArray();
-                foreach (var ally in invitedAllies)
+                JArray jinvallies = new JArray();
+                foreach (string ally in invitedAllies)
                     jinvallies.Add(ally);
                 obj["invitedallies"] = jinvallies;
+
                 return obj;
             }
         }
@@ -1031,9 +1193,9 @@ namespace Oxide.Plugins
         #endregion
 
         #region Messaging
-        string msg(string key, string id = null) => lang.GetMessage(key, this, id);
+        private string Message(string key, string id = null) => lang.GetMessage(key, this, id);
 
-        Dictionary<string, string> Messages = new Dictionary<string, string>
+        private Dictionary<string, string> Messages = new Dictionary<string, string>
         {
             {"playerCon", "{0} has connected to the server" },
             {"outstandingMsgs", "You have {0} outstanding messages. Type /cmessage to view them" },
@@ -1059,7 +1221,7 @@ namespace Oxide.Plugins
             {"createSucc", "You have successfully created a new clan with the tag:"},
             {"clanExists", "A clan already exists with the tag:"},
             {"alreadyMember", "You are already in a clan"},
-            {"memberLimit", "You can not join this clan as it has already reached its member limit"},
+            {"configData.ClanLimits.Members", "You can not join this clan as it has already reached its member limit"},
             {"joinSucc", "You have joined the clan:"},
             {"noInvite", "You do not have a pending invite from the clan:"},
             {"noFindClan", "Unable to find a clan with the tag:"},
@@ -1094,7 +1256,7 @@ namespace Oxide.Plugins
             {"disbSucc", "You have successfully disbanded your clan"},
             {"notOwnerDisb", "Only the owner can disband a clan"},
             {"notOwnerProm", "Only the owner can promote clan members"},
-            {"allyLimit", "You can not request any more alliances as you already have the maximum allowed amount"},
+            {"configData.ClanLimits.Alliances", "You can not request any more alliances as you already have the maximum allowed amount"},
             {"alreadyAllies", "You are already allies with"},
             {"allyReq", "You have requested a clan alliance from"},
             {"reqAlliance", "{0} has requested a clan alliance"},
