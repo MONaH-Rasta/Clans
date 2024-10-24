@@ -10,7 +10,7 @@ using System;
 
 namespace Oxide.Plugins
 {
-    [Info("Clans", "k1lly0u", "0.1.54")]
+    [Info("Clans", "k1lly0u", "0.1.55")]
     [Description("Universal Instance with alliance support")]
     public class Clans : CovalencePlugin
     {
@@ -62,6 +62,8 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            SaveData();
+
             configData = null;
             Instance = null;            
         }
@@ -1018,7 +1020,7 @@ namespace Oxide.Plugins
         #endregion
 
         #region Data Management
-        private void SaveLoop() => timer.Once(configData.Settings.SaveTimer * 60, () => { SaveData(); SaveLoop(); });
+        private void SaveLoop() => timer.Once(configData.Settings.SaveTimer, () => { SaveData(); SaveLoop(); });
 
         private void SaveData()
         {
