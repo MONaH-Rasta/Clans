@@ -10,7 +10,7 @@ using System;
 
 namespace Oxide.Plugins
 {
-    [Info("Clans", "k1lly0u", "0.1.51", ResourceId = 2087)]
+    [Info("Clans", "k1lly0u", "0.1.52", ResourceId = 2087)]
     class Clans : CovalencePlugin
     {
         #region Fields 
@@ -244,7 +244,10 @@ namespace Oxide.Plugins
                     if (!string.IsNullOrEmpty(clanName))
                     {
                         var clan = clanCache[clanName];
-                        clan.Broadcast($"{player.Name} : {string.Join(" ", args)}");
+                        string str = string.Join(" ", args);
+
+                        clan.Broadcast($"{player.Name} : {str}");
+                        Interface.CallHook("OnClanChat", player, str);
                         return;
                     }
                 }
