@@ -10,7 +10,7 @@ using System;
 
 namespace Oxide.Plugins
 {
-    [Info("Clans", "k1lly0u", "0.1.53")]
+    [Info("Clans", "k1lly0u", "0.1.54")]
     [Description("Universal Instance with alliance support")]
     public class Clans : CovalencePlugin
     {
@@ -33,7 +33,9 @@ namespace Oxide.Plugins
         {
             data = Interface.Oxide.DataFileSystem.GetFile("clans_data");
             lang.RegisterMessages(Messages, this);
+
             Instance = this;
+
             clanCache = new Dictionary<string, Clan>();
             playerClans = new Dictionary<string, string>();
         }
@@ -918,14 +920,16 @@ namespace Oxide.Plugins
         #endregion
 
         #region Config        
-        private static ConfigData configData;
-        
-        private class ConfigData
+        public static ConfigData configData;
+
+        public class ConfigData
         {
             [JsonProperty(PropertyName = "Limitations")]
             public ClanLimit ClanLimits { get; set; }
+
             [JsonProperty(PropertyName = "Message colors")]
             public Messaging MessageOptions { get; set; }
+
             [JsonProperty(PropertyName = "Settings")]
             public Options Settings { get; set; }
 
@@ -933,10 +937,13 @@ namespace Oxide.Plugins
             {
                 [JsonProperty(PropertyName = "Clan tag color")]
                 public string ClanTag { get; set; }
+
                 [JsonProperty(PropertyName = "Clan and Alliance chat color")]
                 public string ClanChat { get; set; }
+
                 [JsonProperty(PropertyName = "Highlight color")]
                 public string Main { get; set; }
+
                 [JsonProperty(PropertyName = "Message color")]
                 public string MSG { get; set; }
             }
@@ -944,8 +951,10 @@ namespace Oxide.Plugins
             {
                 [JsonProperty(PropertyName = "Maximum clan member count")]
                 public int Members { get; set; }
+
                 [JsonProperty(PropertyName = "Maximum clan moderator count")]
                 public int Moderators { get; set; }
+
                 [JsonProperty(PropertyName = "Maximum clan alliance count")]
                 public int Alliances { get; set; }
             }
@@ -953,12 +962,16 @@ namespace Oxide.Plugins
             {
                 [JsonProperty(PropertyName = "Minimum clan tag characters")]
                 public int TagMinimum { get; set; }
+
                 [JsonProperty(PropertyName = "Maximum clan tag characters")]
                 public int TagMaximum { get; set; }
+
                 [JsonProperty(PropertyName = "Show clan member connection message")]
                 public bool ShowJoinMessage { get; set; }
+
                 [JsonProperty(PropertyName = "Show clan member disconnection message")]
                 public bool ShowLeaveMessage { get; set; }
+
                 [JsonProperty(PropertyName = "Data save timer (seconds)")]
                 public int SaveTimer { get; set; }
             }
