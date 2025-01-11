@@ -15,7 +15,7 @@ namespace Oxide.Plugins
 {
     using ClansEx;
 
-    [Info("Clans", "k1lly0u", "0.2.6")]
+    [Info("Clans", "k1lly0u", "0.2.7")]
     class Clans : CovalencePlugin
     {
         #region Fields        
@@ -2450,6 +2450,8 @@ namespace Oxide.Plugins
         public bool HasFFEnabled(ulong playerID) => false;
 
         public void ToggleFF(ulong playerID) { }
+
+        internal void CreateClan(BasePlayer player, string tag, string description) => CreateClan(player.IPlayer, tag, description);
 
         internal bool PromotePlayer(BasePlayer promoter, ulong targetId) => PromotePlayer(promoter.IPlayer, targetId.ToString());
 
